@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 import os
+import pywt
 import shutil
 
 def extract_amp_spectrum(trg_img):
@@ -18,7 +19,7 @@ def extract_amp_spectrum(trg_img):
 
     return amp_target
 
-def amp_spectrum_swap( amp_local, amp_target, L=0.1 , ratio=0):
+def amp_spectrum_swap( amp_local, amp_target, L=0.1 , ratio=0, threshold_ratio = 0.05):
     
     a_local = np.fft.fftshift( amp_local, axes=(-2, -1) )
     a_trg = np.fft.fftshift( amp_target, axes=(-2, -1) )
@@ -32,12 +33,16 @@ def amp_spectrum_swap( amp_local, amp_target, L=0.1 , ratio=0):
     h2 = c_h+b+1
     w1 = c_w-b
     w2 = c_w+b+1
-
-    a_local[:,h1:h2,w1:w2] = a_local[:,h1:h2,w1:w2] * ratio + a_trg[:,h1:h2,w1:w2] * (1- ratio)
+    
+    threshold = np.max(np.max(a_trg, 1), 1)*threshold_ratio
+    for i in range(len(amp_target)):
+        a_trg[i] = pywt.threshold(a_trg[i], threshold[i])
+    # a_local[:,h1:h2,w1:w2] = a_local[:,h1:h2,w1:w2] * ratio + a_trg[:,h1:h2,w1:w2] * (1- ratio)
+    a_local[:,h1:h2,w1:w2] = a_local[:,h1:h2,w1:w2] * ratio + pywt.threshold(a_trg[:,h1:h2,w1:w2], T, mode='soft') * (1- ratio)
     a_local = np.fft.ifftshift( a_local, axes=(-2, -1) )
     return a_local
 
-def freq_space_interpolation( local_img, amp_target, L=0 , ratio=0.0):
+def freq_space_interpolation( local_img, amp_target, L=0 , ratio=0.0, threshold_ratio = 0.05):
     
     local_img_np = local_img 
 
@@ -48,7 +53,7 @@ def freq_space_interpolation( local_img, amp_target, L=0 , ratio=0.0):
     amp_local, pha_local = np.abs(fft_local_np), np.angle(fft_local_np)
 
     # swap the amplitude part of local image with target amplitude spectrum
-    amp_local_ = amp_spectrum_swap( amp_local, amp_target, L=L , ratio=ratio)
+    amp_local_ = amp_spectrum_swap( amp_local, amp_target, L=L , ratio=ratio, threshold_ratio = threshold_ratio)
 
     # get transformed image via inverse fft
     fft_local_ = amp_local_ * np.exp( 1j * pha_local )
@@ -78,6 +83,7 @@ if __name__ == "__main__":
     root = './Fundus'
     L = 1
     ratio_max = 1
+    threshold_ratio = 0.05
     shutil.copytree(root, root+'-FDG')
     
     for a in range(4):
@@ -98,7 +104,7 @@ if __name__ == "__main__":
                 im_target = np.asarray(im_target, np.float32)
                 im_target = im_target.transpose((2, 0, 1))
                 amp_target = extract_amp_spectrum(im_target)
-                local_in_trg = freq_space_interpolation(im_source, amp_target, L=L, ratio=1-ratio_max*np.random.rand())
+                local_in_trg = freq_space_interpolation(im_source, amp_target, L=L, ratio=1-ratio_max*np.random.rand(), threshold_ratio = threshold_ratio)
                 local_in_trg = local_in_trg.transpose((1,2,0))
                 
                 img = Image.fromarray((np.clip(local_in_trg, 0, 255)).astype(np.uint8)).save(os.path.join(root+'-FDG', domain_combine, 'train', 'ROIs', 'image', lis_source[i]))
